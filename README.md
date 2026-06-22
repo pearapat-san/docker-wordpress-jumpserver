@@ -1,138 +1,122 @@
-[README.md](https://github.com/user-attachments/files/29192157/README.md)
-# 🐳 WordPress + PostgreSQL + JumpServer (PAM) บน Docker
+[README_EN.md](https://github.com/user-attachments/files/29192915/README_EN.md)
+# WordPress on PostgreSQL with JumpServer PAM
 
-> ระบบ deploy WordPress ที่ใช้ **PostgreSQL** เป็นฐานข้อมูล (ไม่ใช้ MySQL) ทำงานบน **Docker** และเข้าถึงผ่าน **JumpServer** ซึ่งเป็น Open Source PAM (Privileged Access Management) Tool
+A fully containerized deployment of WordPress backed by **PostgreSQL** (not MySQL), served behind **Nginx**, with privileged access managed through **JumpServer**, an open-source Privileged Access Management (PAM) platform.
 
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)
-![Nginx](https://img.shields.io/badge/Nginx-009639?style=flat&logo=nginx&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)
-![WordPress](https://img.shields.io/badge/WordPress-21759B?style=flat&logo=wordpress&logoColor=white)
-![JumpServer](https://img.shields.io/badge/JumpServer-PAM-1ABC9C?style=flat)
-
----
-
-## 📑 สารบัญ (Table of Contents)
-
-1. [ภาพรวมระบบ (Overview)](#-ภาพรวมระบบ-overview)
-2. [Architecture Diagram](#-architecture-diagram)
-3. [สิ่งที่ต้องมีก่อน (Prerequisites)](#-สิ่งที่ต้องมีก่อน-prerequisites)
-4. [ส่วนที่ 1: ติดตั้ง Docker](#-ส่วนที่-1-ติดตั้ง-docker)
-5. [ส่วนที่ 2: Nginx](#-ส่วนที่-2-nginx)
-6. [ส่วนที่ 3: PostgreSQL](#-ส่วนที่-3-postgresql)
-7. [ส่วนที่ 4: WordPress + PG4WP](#-ส่วนที่-4-wordpress--pg4wp)
-8. [ส่วนที่ 5: JumpServer (PAM)](#-ส่วนที่-5-jumpserver-pam)
-9. [ส่วนที่ 6: Remote เข้า WordPress ผ่าน JumpServer](#-ส่วนที่-6-remote-เข้า-wordpress-ผ่าน-jumpserver)
-10. [Troubleshooting](#-troubleshooting-ปัญหาที่เจอและวิธีแก้)
-11. [Revision History](#-revision-history)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Nginx](https://img.shields.io/badge/Nginx-009639?style=flat-square&logo=nginx&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![WordPress](https://img.shields.io/badge/WordPress-21759B?style=flat-square&logo=wordpress&logoColor=white)
+![License](https://img.shields.io/badge/license-Educational-lightgrey?style=flat-square)
 
 ---
 
-## 🎯 ภาพรวมระบบ (Overview)
+## Overview
 
-ระบบนี้เป็นการ deploy เว็บไซต์ WordPress แบบ container ทั้งหมดบน Docker โดยมีจุดเด่นคือ:
+This project deploys a complete WordPress stack on Docker with two distinguishing characteristics:
 
-- **WordPress ใช้ PostgreSQL แทน MySQL** ผ่าน plugin PG4WP (PostgreSQL for WordPress)
-- **เข้าถึงเครื่องผ่าน JumpServer** ซึ่งเป็น PAM Tool ที่ทำหน้าที่เป็นตัวกลาง (bastion host) บันทึก session ทุกครั้งที่มีการ remote เข้า server
+- **WordPress runs on PostgreSQL instead of MySQL**, made possible by the PG4WP compatibility layer.
+- **All administrative access is brokered through JumpServer**, a bastion host that holds credentials, records every session, and removes the need for direct SSH access to the application containers.
 
-**กลุ่มเป้าหมายของเอกสาร:** ผู้ดูแลระบบ (System Admin), DevOps, หรือผู้ที่ต้องการ deploy WordPress + PostgreSQL พร้อมระบบควบคุมการเข้าถึง
+The stack is intended as a reference for system administrators and DevOps engineers who need to run WordPress on PostgreSQL while enforcing controlled, auditable access to infrastructure.
 
-| Component | หน้าที่ | Port |
-|-----------|---------|------|
-| **Nginx** | Web server | 80 |
-| **PostgreSQL** | ฐานข้อมูลของ WordPress | 5432 (internal) |
-| **WordPress** | เว็บไซต์ (ใช้ PG4WP) | 8080 |
-| **JumpServer** | PAM / Bastion host | 8088, 2222 |
+| Component | Role | Exposed Port |
+|-----------|------|--------------|
+| Nginx | Web server | 80 |
+| PostgreSQL | WordPress database | 5432 (internal) |
+| WordPress | Application (via PG4WP) | 8080 |
+| JumpServer | PAM / bastion host | 8088, 2222 |
 
 ---
 
-## 🏗️ Architecture Diagram
+## Architecture
 
 ```
-                          ┌─────────────────┐
-                          │   ผู้ดูแลระบบ      │
-                          │   (Admin)        │
-                          └────────┬────────┘
-                                   │ HTTPS/SSH
-                                   ▼
-                          ┌─────────────────┐
-                          │   JumpServer     │  ← PAM (บันทึก session)
-                          │  Port 8088/2222  │
-                          └────────┬────────┘
-                                   │ SSH (172.18.0.x)
-                                   ▼
-        ┌──────────────────────────────────────────────┐
-        │            Docker Network (wp-network)         │
-        │                                                │
-        │   ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-        │   │  Nginx   │  │WordPress │  │ PostgreSQL │  │
-        │   │  :80     │  │  :8080   │──│   :5432    │  │
-        │   │          │  │ (PG4WP)  │  │            │  │
-        │   └──────────┘  └──────────┘  └────────────┘  │
-        │                                                │
-        └──────────────────────────────────────────────┘
-                         Host: Ubuntu 24 (VMware)
+                          +-----------------+
+                          |  Administrator  |
+                          +--------+--------+
+                                   | HTTPS / SSH
+                                   v
+                          +-----------------+
+                          |   JumpServer    |   PAM - session recording
+                          |  Port 8088/2222 |
+                          +--------+--------+
+                                   | SSH (172.18.0.x)
+                                   v
+        +----------------------------------------------+
+        |          Docker Network (wp-network)         |
+        |                                              |
+        |  +---------+   +----------+   +-----------+  |
+        |  |  Nginx  |   | WordPress|   | PostgreSQL|  |
+        |  |   :80   |   |  :8080   |---|   :5432   |  |
+        |  |         |   |  (PG4WP) |   |           |  |
+        |  +---------+   +----------+   +-----------+  |
+        |                                              |
+        +----------------------------------------------+
+                     Host: Ubuntu 24 (VMware)
 ```
 
-**Flow การทำงาน:**
-1. Admin เชื่อมต่อผ่าน JumpServer (ไม่ SSH เข้า server ตรงๆ)
-2. JumpServer ถือ credentials แทน และบันทึกทุก session
-3. WordPress รับ request แล้วเก็บข้อมูลใน PostgreSQL ผ่าน PG4WP
+**Request flow**
+
+1. Administrators connect through JumpServer rather than SSHing directly into any server.
+2. JumpServer stores the target credentials and records each session for audit.
+3. WordPress serves requests and persists all data to PostgreSQL through PG4WP.
 
 ---
 
-## 📋 สิ่งที่ต้องมีก่อน (Prerequisites)
+## Prerequisites
 
-- **OS:** Ubuntu 24.04 (รันบน VMware)
-- **RAM:** อย่างน้อย 4 GB (JumpServer กินทรัพยากรพอสมควร)
-- **Disk:** อย่างน้อย 20 GB (แนะนำเผื่อ image ขนาดใหญ่)
-- สิทธิ์ `sudo`
-- เชื่อมต่อ internet ได้
+- Ubuntu 24.04 (tested on VMware)
+- Minimum 4 GB RAM (JumpServer is resource-intensive)
+- Minimum 20 GB disk (larger images require headroom)
+- `sudo` privileges
+- Outbound internet access
 
-> ⚠️ **หมายเหตุ:** JumpServer image มีขนาดใหญ่ และ PostgreSQL/WordPress image ก็กินพื้นที่ ควรเตรียม disk ให้พอ มิฉะนั้นจะเจอ `No space left on device`
+> **Note:** The JumpServer, PostgreSQL, and WordPress images are large. Provision sufficient disk space to avoid a `No space left on device` failure during setup.
 
 ---
 
-## 🐳 ส่วนที่ 1: ติดตั้ง Docker
+## 1. Install Docker
 
 ```bash
-# อัปเดตระบบและติดตั้ง dependencies
+# Update the system and install dependencies
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg
 
-# เพิ่ม GPG key ของ Docker
+# Add Docker's official GPG key
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# เพิ่ม Docker repository
+# Add the Docker repository
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# ติดตั้ง Docker Engine
+# Install the Docker Engine
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# ตั้งให้ใช้ docker ได้โดยไม่ต้อง sudo
+# Run Docker without sudo
 sudo usermod -aG docker $USER
 newgrp docker
 
-# ทดสอบ
+# Verify
 docker run hello-world
 ```
 
-✅ **ผลลัพธ์ที่ถูกต้อง:** เห็นข้อความ `Hello from Docker!`
+**Expected result:** the message `Hello from Docker!` is printed.
 
 ---
 
-## 🌐 ส่วนที่ 2: Nginx
+## 2. Nginx
 
 ```bash
-# สร้าง Docker network ให้ทุก container คุยกันได้
+# Create a shared Docker network so the containers can reach each other
 docker network create wp-network
 
-# รัน Nginx
+# Run Nginx
 docker run -d \
   --name nginx \
   --network wp-network \
@@ -140,11 +124,11 @@ docker run -d \
   nginx
 ```
 
-✅ **ทดสอบ:** เปิด browser ไปที่ `http://<server-ip>` → เห็นหน้า **"Welcome to nginx!"**
+**Verify:** open `http://<server-ip>` and confirm the "Welcome to nginx!" page.
 
 ---
 
-## 🐘 ส่วนที่ 3: PostgreSQL
+## 3. PostgreSQL
 
 ```bash
 docker run -d \
@@ -156,15 +140,15 @@ docker run -d \
   postgres
 ```
 
-✅ **ทดสอบ:** `docker ps` → เห็น container `postgres` สถานะ `Up`
+**Verify:** `docker ps` shows the `postgres` container in the `Up` state.
 
 ---
 
-## 📝 ส่วนที่ 4: WordPress + PG4WP
+## 4. WordPress with PG4WP
 
-WordPress image ปกติใช้ MySQL เป็น default จึงต้องสร้าง **custom image** ที่ติดตั้ง plugin **PG4WP** เพื่อให้คุยกับ PostgreSQL ได้
+The official WordPress image targets MySQL by default. A custom image is required to bundle the **PG4WP** compatibility layer so WordPress can communicate with PostgreSQL.
 
-### 4.1 สร้าง Dockerfile
+### 4.1 Create the Dockerfile
 
 ```bash
 mkdir ~/wordpress-pg && cd ~/wordpress-pg
@@ -185,15 +169,15 @@ RUN git clone --branch v3.4.1 https://github.com/PostgreSQL-For-Wordpress/postgr
 EOF
 ```
 
-> 💡 **เกี่ยวกับ PG4WP:** plugin นี้ทำงานโดยดักจับ (intercept) คำสั่งที่ WordPress ส่งไปหา MySQL driver แล้วแปลงเป็น PostgreSQL query ทำให้ WordPress ใช้ PostgreSQL ได้โดยไม่ต้องมี MySQL ในระบบเลย — เราใช้ version **v3.4.1** ซึ่งเป็น release ล่าสุด
+> **About PG4WP:** the plugin intercepts the MySQL driver calls that WordPress issues and rewrites them into PostgreSQL queries. This lets WordPress run on PostgreSQL without MySQL present anywhere in the system. This build pins version **v3.4.1**, the latest release.
 
-### 4.2 Build และรัน
+### 4.2 Build and run
 
 ```bash
-# Build image
+# Build the image
 docker build -t wordpress-pg .
 
-# รัน WordPress
+# Run WordPress
 docker run -d \
   --name wordpress \
   --network wp-network \
@@ -206,15 +190,15 @@ docker run -d \
   wordpress-pg
 ```
 
-✅ **ทดสอบ:** เปิด `http://<server-ip>:8080` → เห็นหน้า WordPress installer (เลือกภาษา)
+**Verify:** open `http://<server-ip>:8080` and confirm the WordPress installer (language selection) appears.
 
 ---
 
-## 🔐 ส่วนที่ 5: JumpServer (PAM)
+## 5. JumpServer (PAM)
 
-JumpServer ต้องการ **PostgreSQL** และ **Redis** ของตัวเองแยกต่างหาก จึงใช้ `docker-compose` จัดการทั้งชุด
+JumpServer requires its own PostgreSQL and Redis instances, so the full set is managed with Docker Compose.
 
-### 5.1 สร้าง docker-compose.yml
+### 5.1 Create docker-compose.yml
 
 ```bash
 mkdir ~/jumpserver && cd ~/jumpserver
@@ -269,29 +253,29 @@ volumes:
 EOF
 ```
 
-> ⚠️ แก้ `<server-ip>` ใน `DOMAINS` เป็น IP จริงของเครื่อง เช่น `192.168.91.146:8088`
+> Replace `<server-ip>` in `DOMAINS` with the host's real IP, for example `192.168.91.146:8088`.
 
-### 5.2 รัน
+### 5.2 Start the stack
 
 ```bash
 docker compose up -d
 
-# ตรวจสอบ log (รอ 2-3 นาทีให้ระบบพร้อม)
+# Inspect the logs (allow 2-3 minutes for initialization)
 docker logs jumpserver --tail 20
 ```
 
-✅ **ทดสอบ:** เปิด `http://<server-ip>:8088` → login ด้วย `admin` / `admin`
+**Verify:** open `http://<server-ip>:8088` and sign in with `admin` / `admin`.
 
-> 📌 **สำคัญ:** ต้องใช้ **PostgreSQL 16** (ไม่ใช่ 13) เพราะ JumpServer เวอร์ชันใหม่ใช้คำสั่ง `REFRESH COLLATION VERSION` ที่รองรับใน PostgreSQL 14+ เท่านั้น
+> **Important:** Use **PostgreSQL 16**, not 13. Recent JumpServer releases issue the `REFRESH COLLATION VERSION` statement, which is only supported on PostgreSQL 14 and later.
 
 ---
 
-## 🔗 ส่วนที่ 6: Remote เข้า WordPress ผ่าน JumpServer
+## 6. Remote Access to WordPress via JumpServer
 
-### 6.1 เตรียม WordPress container ให้รับ SSH
+### 6.1 Prepare the WordPress container for SSH
 
 ```bash
-# ติดตั้งและตั้งค่า SSH + Python (จำเป็นสำหรับ Ansible ของ JumpServer)
+# Install and configure SSH and Python (required by JumpServer's Ansible checks)
 docker exec -it wordpress bash -c "\
   apt-get update && \
   apt-get install -y openssh-server python3 && \
@@ -301,84 +285,82 @@ docker exec -it wordpress bash -c "\
   sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
   /usr/sbin/sshd"
 
-# เชื่อม JumpServer เข้า network เดียวกับ WordPress
+# Attach JumpServer to the same network as WordPress
 docker network connect wp-network jumpserver
 
-# หา IP ของ WordPress container
+# Find the WordPress container's IP
 docker inspect wordpress | grep IPAddress
 ```
 
-### 6.2 ตั้งค่าใน JumpServer (Web UI)
+### 6.2 Configure the asset in JumpServer (Web UI)
 
 1. **Assets → Asset list → Create → Linux**
    - Name: `WordPress`
-   - IP/Host: `172.18.0.4` (IP จากขั้นตอนข้างบน)
-   - Platform: `Linux` / Port: `22`
+   - IP/Host: `172.18.0.4` (the IP from the previous step)
+   - Platform: `Linux`, Port: `22`
    - Nodes: `DEFAULT`
-2. **เพิ่ม Account:** Username `root` / Password `p@ssword` / ✅ Privileged
+2. **Add an account:** username `root`, password `p@ssword`, marked as privileged.
 3. **Permissions → Asset Permissions → Create**
    - Users: `admin`
    - Assets: `WordPress`
    - Accounts: `All`
-4. **ทดสอบ:** คลิก asset → **Test connectivity** → ต้องได้ `ok=1`
+4. **Test:** select the asset and run **Test connectivity**. A successful run reports `ok=1`.
 
-### 6.3 เข้าใช้งานผ่าน Web Terminal
+### 6.3 Connect through the web terminal
 
-เปิด `http://<server-ip>:8088/luna/` → คลิก asset **WordPress** → เข้า terminal ได้เลย
+Open `http://<server-ip>:8088/luna/`, select the **WordPress** asset, and the terminal session opens.
 
-✅ **ยืนยัน:** พิมพ์ `ls /var/www/html` แล้วเห็นไฟล์ WordPress (`wp-config.php`, `wp-content` ฯลฯ)
+**Confirm:** run `ls /var/www/html` and verify the WordPress files (`wp-config.php`, `wp-content`, and so on) are listed.
 
 ---
 
-## 🔧 Troubleshooting (ปัญหาที่เจอและวิธีแก้)
+## Troubleshooting
 
-ตารางนี้รวบรวมปัญหาจริงที่พบระหว่างติดตั้ง พร้อมวิธีแก้:
+Issues encountered during setup, with their causes and resolutions.
 
-| # | ปัญหา (Error) | สาเหตุ | วิธีแก้ |
-|---|---------------|--------|---------|
-| 1 | `REMOTE HOST IDENTIFICATION HAS CHANGED` | SSH key เก่าของเครื่องเปลี่ยน | `ssh-keygen -R <ip>` แล้ว SSH ใหม่ |
-| 2 | `su: Authentication failure` | Ubuntu ปิด root login | ใช้ `sudo su` หรือ `sudo -i` |
-| 3 | `unzip: not found` (ตอน build) | WordPress image ไม่มี unzip | เพิ่ม `unzip` ใน Dockerfile |
-| 4 | `End-of-central-directory signature not found` | curl ตาม redirect ของ GitHub ไม่ได้ | เปลี่ยนไปใช้ `git clone` แทน |
-| 5 | WordPress ใช้ MySQL ไม่ใช่ PostgreSQL | image ปกติ default เป็น MySQL | สร้าง custom image + PG4WP |
-| 6 | `No space left on device` | Disk เต็ม | `docker image prune -a` หรือขยาย disk ด้วย `lvextend` + `resize2fs` |
-| 7 | `database "jumpserver" does not exist` | JumpServer ไม่มี DB ของตัวเอง | เพิ่ม PostgreSQL service แยกใน compose |
-| 8 | `AUTH called without any password` (Redis) | Redis ไม่ได้ตั้ง password | เพิ่ม `--requirepass` + `REDIS_PASSWORD` |
-| 9 | `syntax error at or near "REFRESH"` | PostgreSQL 13 เก่าเกินไป | เปลี่ยนเป็น `postgres:16` |
-| 10 | `Configuration file has problems` (login) | ไม่ได้ตั้งค่า DOMAINS | เพิ่ม env `DOMAINS=<ip>:8088` |
-| 11 | Asset `UNREACHABLE` (ssh timeout) | JumpServer กับ WordPress คนละ network | `docker network connect wp-network jumpserver` |
-| 12 | `Invalid/incorrect password` | password container กับใน JumpServer ไม่ตรง | ตั้ง password ให้ตรงกันด้วย `chpasswd` |
-| 13 | `/usr/bin/python: not found` (Ansible) | WordPress container ไม่มี Python | ติดตั้ง `python3` + symlink เป็น `python` |
-| 14 | Asset tree ว่างใน Luna | ยังไม่ได้ตั้ง Asset Permission | สร้าง Asset Permission ผูก user กับ asset |
+| # | Symptom | Cause | Resolution |
+|---|---------|-------|------------|
+| 1 | `REMOTE HOST IDENTIFICATION HAS CHANGED` | Stale SSH host key | `ssh-keygen -R <ip>`, then reconnect |
+| 2 | `su: Authentication failure` | Ubuntu disables direct root login | Use `sudo su` or `sudo -i` |
+| 3 | `unzip: not found` during build | Base image lacks unzip | Add `unzip` to the Dockerfile |
+| 4 | `End-of-central-directory signature not found` | curl did not follow the GitHub redirect | Use `git clone` instead |
+| 5 | WordPress targets MySQL, not PostgreSQL | Default image uses MySQL | Build a custom image with PG4WP |
+| 6 | `No space left on device` | Disk full | `docker image prune -a`, or extend the disk with `lvextend` and `resize2fs` |
+| 7 | `database "jumpserver" does not exist` | JumpServer has no database of its own | Add a dedicated PostgreSQL service to Compose |
+| 8 | `AUTH called without any password` (Redis) | Redis has no password set | Add `--requirepass` and `REDIS_PASSWORD` |
+| 9 | `syntax error at or near "REFRESH"` | PostgreSQL 13 is too old | Switch to `postgres:16` |
+| 10 | `Configuration file has problems` at login | `DOMAINS` not configured | Add `DOMAINS=<ip>:8088` |
+| 11 | Asset reported `UNREACHABLE` (SSH timeout) | JumpServer and WordPress on different networks | `docker network connect wp-network jumpserver` |
+| 12 | `Invalid/incorrect password` | Container and JumpServer passwords differ | Align them with `chpasswd` |
+| 13 | `/usr/bin/python: not found` (Ansible) | WordPress container lacks Python | Install `python3` and symlink it to `python` |
+| 14 | Empty asset tree in Luna | No asset permission configured | Create an asset permission linking the user to the asset |
 
-### คำสั่งขยาย disk (อ้างอิงปัญหา #6)
+### Disk extension (related to issue 6)
 
 ```bash
 sudo lvextend -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv
 sudo resize2fs /dev/mapper/ubuntu--vg-ubuntu--lv
-df -h   # ตรวจสอบพื้นที่
+df -h   # confirm the new free space
 ```
 
 ---
 
-## 📜 Revision History
+## Revision History
 
-| Version | วันที่ | รายละเอียด | ผู้จัดทำ |
-|---------|--------|------------|----------|
-| 1.0 | 2026-06-22 | จัดทำเอกสารฉบับแรก ครอบคลุมทั้งระบบ | - |
+| Version | Date | Description | Author |
+|---------|------|-------------|--------|
+| 1.0 | 2026-06-22 | Initial release covering the full stack | - |
 
 ---
 
-## 📚 References
+## References
 
-- [PG4WP - PostgreSQL for WordPress](https://github.com/PostgreSQL-For-Wordpress/postgresql-for-wordpress)
-- [JumpServer Official](https://www.jumpserver.org)
+- [PG4WP — PostgreSQL for WordPress](https://github.com/PostgreSQL-For-Wordpress/postgresql-for-wordpress)
+- [JumpServer](https://www.jumpserver.org)
 - [Docker Documentation](https://docs.docker.com)
 
 ---
 
 <div align="center">
-
-**จัดทำเพื่อการศึกษา** · Docker + PostgreSQL + JumpServer Lab
-
+Prepared for educational purposes — Docker, PostgreSQL, and JumpServer lab.
 </div>
