@@ -1,0 +1,47 @@
+version: '3'
+services:
+  db:
+    image: postgres:16
+    container_name: jumpserver_db
+    restart: always
+    environment:
+      - POSTGRES_DB=jumpserver
+      - POSTGRES_USER=jumpserver
+      - POSTGRES_PASSWORD=jumpserver
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: jumpserver_redis
+    restart: always
+    command: redis-server --requirepass jumpserver
+
+  jumpserver:
+    image: jumpserver/jms_all:latest
+    container_name: jumpserver
+    restart: always
+    privileged: true
+    environment:
+      - SECRET_KEY=jumpserversecretkey1234567890abcdef
+      - BOOTSTRAP_TOKEN=bootstraptoken1234
+      - LOG_LEVEL=ERROR
+      - DB_ENGINE=postgresql
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=jumpserver
+      - DB_PASSWORD=jumpserver
+      - DB_NAME=jumpserver
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=jumpserver
+      - DOMAINS=192.168.91.146:8088
+    ports:
+      - "8088:80"
+      - "2222:2222"
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  db_data:
