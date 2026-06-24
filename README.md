@@ -31,30 +31,7 @@ The stack is intended as a reference for system administrators and DevOps engine
 
 ## Architecture
 
-```
-                          +-----------------+
-                          |  Administrator  |
-                          +--------+--------+
-                                   | HTTPS / SSH
-                                   v
-                          +-----------------+
-                          |   JumpServer    |   PAM - session recording
-                          |  Port 8088/2222 |
-                          +--------+--------+
-                                   | SSH (172.18.0.x)
-                                   v
-        +----------------------------------------------+
-        |          Docker Network (wp-network)         |
-        |                                              |
-        |  +---------+   +----------+   +-----------+  |
-        |  |  Nginx  |   | WordPress|   | PostgreSQL|  |
-        |  |   :80   |   |  :8080   |---|   :5432   |  |
-        |  |         |   |  (PG4WP) |   |           |  |
-        |  +---------+   +----------+   +-----------+  |
-        |                                              |
-        +----------------------------------------------+
-                     Host: Ubuntu 24 (VMware)
-```
+![Architecture_Diagram](assets/jumpserver-architecture.png)
 
 **Request flow**
 
